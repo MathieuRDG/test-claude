@@ -43,6 +43,11 @@ impl Target {
         }
     }
 
+    #[cfg(windows)]
+    pub fn from_hwnd(hwnd: isize) -> Self {
+        Target { hwnd }
+    }
+
     pub fn restore(&self) {
         #[cfg(windows)]
         if self.hwnd != 0 {
@@ -63,10 +68,17 @@ pub fn capture() -> Result<Option<String>, String> {
 }
 
 /// Colle `text` à la place de la sélection dans l'application qui a le focus.
-pub fn paste(text: &str, restore_clipboard: bool) -> Result<PasteOutcome, String> {
+/// Avec `select_all`, sélectionne d'abord tout le contenu du champ (Ctrl+A).
+pub fn paste(text: &str, restore_clipboard: bool, select_all: bool) -> Result<PasteOutcome, String> {
     let previous = platform::get_clipboard_text();
     platform::set_clipboard_text(text)?;
     sleep(Duration::from_millis(120));
+    if select_all {
+        if let Err(msg) = platform::send_select_all() {
+            return Ok(PasteOutcome::CopiedOnly(msg));
+        }
+        sleep(Duration::from_millis(80));
+    }
     match platform::send_paste() {
         Ok(()) => {
             if restore_clipboard {
@@ -221,6 +233,10 @@ mod platform {
     pub fn send_paste() -> Result<(), String> {
         send_shortcut('v')
     }
+
+    pub fn send_select_all() -> Result<(), String> {
+        send_shortcut('a')
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +387,22 @@ mod platform {
         Err("Texte corrigé copié dans le presse-papiers : colle-le avec Ctrl+V. \
              Pour le collage automatique sous Wayland, installe wtype (Hyprland, Sway) ou ydotool (KDE, GNOME)."
             .into())
+    }
+
+    pub fn send_select_all() -> Result<(), String> {
+        if !is_wayland() {
+            return send_shortcut('a');
+        }
+        if let Ok((true, _)) =
+            run("wtype", &["-s", "120", "-M", "ctrl", "-k", "a", "-m", "ctrl"], None, false, Duration::from_secs(3))
+        {
+            return Ok(());
+        }
+        // 30 = KEY_A
+        if let Ok((true, _)) = run("ydotool", &["key", "29:1", "30:1", "30:0", "29:0"], None, false, Duration::from_secs(2)) {
+            return Ok(());
+        }
+        Err("Sélection automatique impossible : texte corrigé copié, sélectionne le champ puis colle avec Ctrl+V.".into())
     }
 }
 

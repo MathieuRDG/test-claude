@@ -14,6 +14,16 @@ pub fn default_shortcut() -> String {
     }
 }
 
+/// Combinaisons essayées, dans l'ordre, si le raccourci par défaut est déjà pris par une autre application.
+pub fn fallback_shortcuts() -> Vec<String> {
+    let list: &[&str] = if cfg!(target_os = "macos") {
+        &["Cmd+Ctrl+K", "Cmd+Alt+Shift+K", "Cmd+Alt+Shift+Space"]
+    } else {
+        &["Ctrl+Alt+K", "Ctrl+Alt+Shift+Space", "Ctrl+Alt+Shift+K", "Ctrl+Alt+F12"]
+    };
+    list.iter().map(|s| s.to_string()).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -37,6 +47,20 @@ pub struct Config {
     pub username: String,
     /// Clé API LanguageTool Premium (optionnelle).
     pub api_key: String,
+    /// Bulle de correction en direct à côté du champ de saisie actif (Windows).
+    pub bubble: bool,
+    /// Exécutables où la bulle ne s'affiche jamais (gestionnaires de mots de passe, terminaux…).
+    pub bubble_excluded_apps: Vec<String>,
+}
+
+pub fn default_excluded_apps() -> Vec<String> {
+    [
+        "KeePass.exe", "KeePassXC.exe", "1Password.exe", "Bitwarden.exe", "WindowsTerminal.exe",
+        "cmd.exe", "powershell.exe", "pwsh.exe", "Code.exe", "devenv.exe", "mstsc.exe",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 impl Default for Config {
@@ -52,6 +76,8 @@ impl Default for Config {
             disabled_rules: Vec::new(),
             username: String::new(),
             api_key: String::new(),
+            bubble: true,
+            bubble_excluded_apps: default_excluded_apps(),
         }
     }
 }
@@ -91,6 +117,7 @@ impl Config {
         self.api_key = self.api_key.trim().to_string();
         self.dictionary = dedup_trimmed(self.dictionary);
         self.disabled_rules = dedup_trimmed(self.disabled_rules);
+        self.bubble_excluded_apps = dedup_trimmed(self.bubble_excluded_apps);
         self
     }
 

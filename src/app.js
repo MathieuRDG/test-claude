@@ -49,7 +49,10 @@ let dirty = false;
 let lastError = null;
 let detectedLang = '';
 let fromSelection = false;
+let captureMode = 'selection';
 let lastCaptureId = 0;
+let pendingShortcut = null;
+let recording = false;
 const ignored = new Set();
 
 const isMac = () => platform.os === 'macos';
@@ -276,7 +279,8 @@ function renderButtons() {
 }
 
 function updateSource() {
-  el.source.textContent = fromSelection ? 'Sélection capturée' : 'Éditeur';
+  el.source.textContent = !fromSelection ? 'Éditeur' : captureMode === 'field' ? 'Champ capturé' : 'Sélection capturée';
+  el.source.title = fromSelection && captureMode === 'field' ? '« Remplacer » remplacera tout le texte du champ' : '';
   el.source.classList.toggle('selection', fromSelection);
   renderButtons();
 }
@@ -428,6 +432,7 @@ function applyCapture(c) {
   hidePopover();
   if (c.from_selection) {
     fromSelection = true;
+    captureMode = c.mode || 'selection';
     setText(c.text);
     hideNotice();
     runCheck();
@@ -517,8 +522,13 @@ async function openSettings() {
   f.server_url.value = config.server_url;
   f.username.value = config.username;
   f.api_key.value = config.api_key;
-  f.shortcut.value = config.shortcut;
+  pendingShortcut = null;
+  recording = false;
+  renderShortcut();
   f.live.checked = config.live;
+  f.bubble.checked = config.bubble;
+  f.bubble_excluded_apps.value = config.bubble_excluded_apps.join('\n');
+  $('bubble-settings').hidden = !platform.bubble_supported;
   f.picky.checked = config.picky;
   f.restore_clipboard.checked = config.restore_clipboard;
   f.dictionary.value = config.dictionary.join('\n');
@@ -528,7 +538,7 @@ async function openSettings() {
   $('shortcut-wayland').hidden = !platform.wayland;
   $('test-result').textContent = '';
   $('test-result').className = 'small';
-  $('settings-error').textContent = platform.shortcut_error || '';
+  $('settings-error').textContent = '';
   $('about').textContent = `Coquille ${platform.version} · ${platform.config_path}`;
   if (!el.dialog.open) el.dialog.showModal();
 }
@@ -541,20 +551,24 @@ async function saveSettings(ev) {
     server_url: f.server_url.value,
     username: f.username.value,
     api_key: f.api_key.value,
-    shortcut: f.shortcut.value || config.shortcut,
+    shortcut: pendingShortcut || config.shortcut,
     live: f.live.checked,
+    bubble: f.bubble.checked,
+    bubble_excluded_apps: lines(f.bubble_excluded_apps.value),
     picky: f.picky.checked,
     restore_clipboard: f.restore_clipboard.checked,
     dictionary: lines(f.dictionary.value),
     disabled_rules: lines(f.disabled_rules.value),
   };
   const serverChanged = next.server_url.trim() !== config.server_url;
+  if (recording) await stopRecording();
   try {
     config = await invoke('save_config', { config: next });
   } catch (e) {
     $('settings-error').textContent = String(e);
     return;
   }
+  pendingShortcut = null;
   try { await invoke('set_autostart', { enabled: f.autostart.checked }); } catch (e) {
     toast(`Lancement automatique : ${e}`);
   }
@@ -597,23 +611,66 @@ function keyFromEvent(e) {
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code)) return e.code;
   return CODE_KEYS[e.code] || null;
 }
-function recordShortcut(e) {
-  if (e.key === 'Tab') return;
+const prettyShortcut = (acc) => acc.split('+').map((k) => ({ Space: 'Espace', Shift: 'Maj', Super: 'Win', Cmd: '⌘' }[k] || k)).join(' + ');
+
+function renderShortcut() {
+  const rec = $('shortcut-rec');
+  rec.classList.toggle('recording', recording);
+  $('shortcut-keys').textContent = recording ? '…' : prettyShortcut(pendingShortcut || config.shortcut);
+  $('shortcut-hint').textContent = recording ? 'Appuie sur la nouvelle combinaison… (Échap : annuler)' : 'Cliquer pour changer';
+  const status = $('shortcut-status');
+  if (recording) {
+    status.className = 'small muted';
+    status.textContent = 'Combinaison avec au moins Ctrl, Alt ou Win (Maj en plus si tu veux).';
+  } else if (pendingShortcut && pendingShortcut !== config.shortcut) {
+    status.className = 'small muted';
+    status.textContent = 'Clique sur « Enregistrer » pour activer ce raccourci.';
+  } else if (platform.shortcut_error) {
+    status.className = 'small error-text';
+    status.textContent = `✗ ${platform.shortcut_error}`;
+  } else if (platform.shortcut_active) {
+    status.className = 'small ok-text';
+    status.textContent = '✓ Raccourci actif dans toutes les applications.';
+  } else {
+    status.textContent = '';
+  }
+}
+
+async function startRecording() {
+  if (recording) return;
+  recording = true;
+  renderShortcut();
+  // Le raccourci actuel ne doit pas se déclencher pendant qu'on en choisit un nouveau.
+  try { await invoke('suspend_shortcut'); } catch { /* ignoré */ }
+}
+
+async function stopRecording() {
+  if (!recording) return;
+  recording = false;
+  try { platform.shortcut_error = await invoke('resume_shortcut'); } catch { /* ignoré */ }
+  renderShortcut();
+}
+
+function onRecordKey(e) {
+  if (!recording) return;
   e.preventDefault();
   e.stopPropagation();
-  const input = e.currentTarget;
-  if (e.key === 'Backspace' || e.key === 'Delete') { input.value = ''; return; }
-  if (e.key === 'Escape') { input.blur(); return; }
+  if (e.key === 'Escape') { stopRecording(); return; }
   const key = keyFromEvent(e);
-  if (!key) return; // touche de modification seule
+  if (!key) return; // touche de modification seule : on attend la suite
   const mods = [];
   if (e.ctrlKey) mods.push('Ctrl');
   if (e.altKey) mods.push('Alt');
   if (e.shiftKey) mods.push('Shift');
   if (e.metaKey) mods.push(isMac() ? 'Cmd' : 'Super');
-  if (!mods.length) { $('settings-error').textContent = 'Ajoute au moins une touche de modification (Ctrl, Alt, Maj…).'; return; }
-  $('settings-error').textContent = '';
-  input.value = [...mods, key].join('+');
+  // Maj seule ne suffit pas : taper une majuscule déclencherait Coquille.
+  if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+    $('shortcut-status').className = 'small error-text';
+    $('shortcut-status').textContent = 'Utilise au moins Ctrl, Alt ou Win (Maj seule ne suffit pas).';
+    return;
+  }
+  pendingShortcut = [...mods, key].join('+');
+  stopRecording();
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +733,11 @@ function bindEvents() {
   $('btn-cancel').addEventListener('click', () => el.dialog.close());
   $('btn-test').addEventListener('click', testServer);
   $('btn-public').addEventListener('click', () => { el.form.elements.server_url.value = PUBLIC_SERVER; testServer(); });
-  el.form.elements.shortcut.addEventListener('keydown', recordShortcut);
+  $('shortcut-rec').addEventListener('click', startRecording);
+  document.addEventListener('keydown', onRecordKey, true);
+  // Échap pendant l'enregistrement annule la saisie, pas toute la fenêtre de paramètres.
+  el.dialog.addEventListener('cancel', (e) => { if (recording) e.preventDefault(); });
+  el.dialog.addEventListener('close', () => { if (recording) stopRecording(); });
 }
 
 async function init() {
@@ -691,7 +752,8 @@ async function init() {
   await listen('open-settings', () => openSettings());
   const pending = await invoke('take_pending');
   if (pending) applyCapture(pending);
-  if (platform.shortcut_error) showNotice(platform.shortcut_error, 'warn');
+  if (platform.shortcut_notice) showNotice(platform.shortcut_notice, 'info');
+  else if (platform.shortcut_error) showNotice(platform.shortcut_error, 'warn');
   render();
   el.text.focus();
 }

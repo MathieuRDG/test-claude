@@ -1,6 +1,7 @@
 // Pas de console supplémentaire sous Windows en mode release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bubble;
 mod config;
 mod langtool;
 mod selection;
@@ -31,6 +32,12 @@ struct AppState {
     capturing: AtomicBool,
     capture_seq: AtomicU64,
     shortcut_error: Mutex<Option<String>>,
+    shortcut_notice: Mutex<Option<String>>,
+    /// Canal vers le thread de la bulle (Windows).
+    bubble_tx: Mutex<Option<std::sync::mpsc::Sender<bubble::Command>>>,
+    bubble_state: Mutex<Option<bubble::BubbleState>>,
+    /// Le texte capturé est le champ entier (bulle) : on sélectionne tout avant de coller.
+    replace_field: AtomicBool,
 }
 
 #[derive(Clone, Serialize)]
@@ -38,6 +45,8 @@ struct Capture {
     id: u64,
     text: String,
     from_selection: bool,
+    /// "selection" (raccourci) ou "field" (champ entier, depuis la bulle)
+    mode: &'static str,
     notice: Option<String>,
 }
 
@@ -47,6 +56,8 @@ struct PlatformInfo {
     wayland: bool,
     shortcut_active: bool,
     shortcut_error: Option<String>,
+    shortcut_notice: Option<String>,
+    bubble_supported: bool,
     config_path: String,
     version: &'static str,
 }
@@ -101,16 +112,43 @@ fn trigger_capture(app: &AppHandle) {
         let result = selection::capture();
         let id = state.capture_seq.fetch_add(1, Ordering::SeqCst) + 1;
         let capture = match result {
-            Ok(Some(text)) if !text.trim().is_empty() => Capture { id, text, from_selection: true, notice: None },
-            Ok(_) => Capture { id, text: String::new(), from_selection: false, notice: Some(selection::NO_SELECTION.into()) },
-            Err(e) => Capture { id, text: String::new(), from_selection: false, notice: Some(e) },
+            Ok(Some(text)) if !text.trim().is_empty() => {
+                Capture { id, text, from_selection: true, mode: "selection", notice: None }
+            }
+            Ok(_) => Capture {
+                id,
+                text: String::new(),
+                from_selection: false,
+                mode: "selection",
+                notice: Some(selection::NO_SELECTION.into()),
+            },
+            Err(e) => Capture { id, text: String::new(), from_selection: false, mode: "selection", notice: Some(e) },
         };
+        state.replace_field.store(false, Ordering::SeqCst);
         *state.target.lock().unwrap() = target;
         *state.pending.lock().unwrap() = Some(capture.clone());
         show_main(&app);
         let _ = app.emit_to("main", "capture", capture);
         state.capturing.store(false, Ordering::SeqCst);
     });
+}
+
+/// Ouvre l'éditeur avec tout le texte d'un champ (depuis la bulle) ; « Remplacer » remplacera le champ entier.
+#[allow(dead_code)]
+pub(crate) fn open_editor_with_field(app: &AppHandle, text: String, hwnd: isize) {
+    let state = app.state::<AppState>();
+    let id = state.capture_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let capture = Capture { id, text, from_selection: true, mode: "field", notice: None };
+    #[cfg(windows)]
+    {
+        *state.target.lock().unwrap() = selection::Target::from_hwnd(hwnd);
+    }
+    #[cfg(not(windows))]
+    let _ = hwnd;
+    state.replace_field.store(true, Ordering::SeqCst);
+    *state.pending.lock().unwrap() = Some(capture.clone());
+    show_main(app);
+    let _ = app.emit_to("main", "capture", capture);
 }
 
 fn handle_args(app: &AppHandle, argv: &[String], first_launch: bool) {
@@ -133,8 +171,47 @@ fn register_shortcut(app: &AppHandle, accelerator: &str) -> Result<(), String> {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
     gs.register(accelerator).map_err(|e| {
-        format!("Raccourci « {accelerator} » refusé (format invalide ou déjà utilisé par une autre application) : {e}")
+        let detail = e.to_string();
+        if detail.to_lowercase().contains("already registered") {
+            format!(
+                "« {accelerator} » est déjà réservé par une autre application (lanceur, PowerToys, logiciel de clavier…). \
+                 Choisis une autre combinaison dans ⚙ › Raccourci global."
+            )
+        } else {
+            format!("« {accelerator} » n'est pas une combinaison valide ({detail}).")
+        }
     })
+}
+
+/// Enregistre le raccourci configuré. Si c'est le raccourci par défaut et qu'il est déjà pris
+/// par une autre application, essaie des combinaisons de repli et enregistre celle qui marche.
+fn register_configured_shortcut(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let wanted = state.config.lock().unwrap().shortcut.clone();
+    match register_shortcut(app, &wanted) {
+        Ok(()) => {
+            *state.shortcut_error.lock().unwrap() = None;
+        }
+        Err(e) if wanted == config::default_shortcut() => {
+            let fallback = config::fallback_shortcuts()
+                .into_iter()
+                .find(|candidate| register_shortcut(app, candidate).is_ok());
+            match fallback {
+                Some(candidate) => {
+                    let mut cfg = state.config.lock().unwrap().clone();
+                    cfg.shortcut = candidate.clone();
+                    let _ = persist(&state, cfg);
+                    *state.shortcut_error.lock().unwrap() = None;
+                    *state.shortcut_notice.lock().unwrap() = Some(format!(
+                        "{wanted} était déjà pris par une autre application : Coquille utilise maintenant {candidate}. \
+                         Tu peux le changer dans ⚙ › Raccourci global."
+                    ));
+                }
+                None => *state.shortcut_error.lock().unwrap() = Some(e),
+            }
+        }
+        Err(e) => *state.shortcut_error.lock().unwrap() = Some(e),
+    }
 }
 
 fn shortcut_supported() -> bool {
@@ -198,6 +275,26 @@ fn save_config(app: AppHandle, state: State<AppState>, config: Config) -> Result
     persist(&state, new)
 }
 
+/// Désactive le raccourci global le temps d'en enregistrer un nouveau dans les paramètres.
+#[tauri::command]
+fn suspend_shortcut(app: AppHandle) {
+    if shortcut_supported() {
+        let _ = app.global_shortcut().unregister_all();
+    }
+}
+
+#[tauri::command]
+fn resume_shortcut(app: AppHandle) -> Option<String> {
+    if !shortcut_supported() {
+        return None;
+    }
+    let state = app.state::<AppState>();
+    let wanted = state.config.lock().unwrap().shortcut.clone();
+    let err = register_shortcut(&app, &wanted).err();
+    *state.shortcut_error.lock().unwrap() = err.clone();
+    err
+}
+
 #[tauri::command]
 fn add_to_dictionary(state: State<AppState>, word: String) -> Result<Config, String> {
     let mut cfg = state.config.lock().unwrap().clone();
@@ -231,13 +328,14 @@ fn hide_window(app: AppHandle) {
 async fn apply_text(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<ApplyResult, String> {
     let target = *state.target.lock().unwrap();
     let restore = state.config.lock().unwrap().restore_clipboard;
+    let select_all = state.replace_field.load(Ordering::SeqCst);
     hide_main(&app);
     #[cfg(target_os = "macos")]
     let _ = app.hide(); // rend la main à l'application précédente
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         target.restore();
         std::thread::sleep(Duration::from_millis(250));
-        selection::paste(&text, restore)
+        selection::paste(&text, restore, select_all)
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -254,6 +352,42 @@ async fn apply_text(app: AppHandle, state: State<'_, AppState>, text: String) ->
     }
 }
 
+fn send_bubble(state: &AppState, cmd: bubble::Command) {
+    if let Some(tx) = state.bubble_tx.lock().unwrap().as_ref() {
+        let _ = tx.send(cmd);
+    }
+}
+
+#[tauri::command]
+fn bubble_get_state(state: State<AppState>) -> Option<bubble::BubbleState> {
+    state.bubble_state.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn bubble_expand(state: State<AppState>, expanded: bool) {
+    send_bubble(&state, bubble::Command::Expand(expanded));
+}
+
+#[tauri::command]
+fn bubble_apply(state: State<AppState>, offset: usize, length: usize, original: String, replacement: String) {
+    send_bubble(&state, bubble::Command::Apply { offset, length, original, replacement });
+}
+
+#[tauri::command]
+fn bubble_ignore(state: State<AppState>, rule_id: String, original: String) {
+    send_bubble(&state, bubble::Command::Ignore { rule_id, original });
+}
+
+#[tauri::command]
+fn bubble_recheck(state: State<AppState>) {
+    send_bubble(&state, bubble::Command::Recheck);
+}
+
+#[tauri::command]
+fn bubble_open_editor(state: State<AppState>) {
+    send_bubble(&state, bubble::Command::OpenEditor);
+}
+
 #[tauri::command]
 fn platform_info(state: State<AppState>) -> PlatformInfo {
     let shortcut_error = state.shortcut_error.lock().unwrap().clone();
@@ -262,6 +396,8 @@ fn platform_info(state: State<AppState>) -> PlatformInfo {
         wayland: selection::is_wayland(),
         shortcut_active: shortcut_supported() && shortcut_error.is_none(),
         shortcut_error,
+        shortcut_notice: state.shortcut_notice.lock().unwrap().take(),
+        bubble_supported: cfg!(windows),
         config_path: state.config_path.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
     }
@@ -356,7 +492,6 @@ fn main() {
         .setup(|app| {
             let config_path = app.path().app_config_dir()?.join("config.json");
             let cfg = Config::load(&config_path);
-            let shortcut = cfg.shortcut.clone();
             app.manage(AppState {
                 config: Mutex::new(cfg),
                 config_path,
@@ -366,18 +501,44 @@ fn main() {
                 capturing: AtomicBool::new(false),
                 capture_seq: AtomicU64::new(0),
                 shortcut_error: Mutex::new(None),
+                shortcut_notice: Mutex::new(None),
+                bubble_tx: Mutex::new(None),
+                bubble_state: Mutex::new(None),
+                replace_field: AtomicBool::new(false),
             });
 
             let handle = app.handle().clone();
             if shortcut_supported() {
-                if let Err(e) = register_shortcut(&handle, &shortcut) {
-                    eprintln!("{e}");
-                    *app.state::<AppState>().shortcut_error.lock().unwrap() = Some(e);
-                }
+                register_configured_shortcut(&handle);
             }
+            let shortcut = app.state::<AppState>().config.lock().unwrap().shortcut.clone();
             if let Err(e) = build_tray(&handle, &shortcut) {
                 // Pas de zone de notification (ex. GNOME sans extension AppIndicator) : l'app reste utilisable.
                 eprintln!("Icône de notification indisponible : {e}");
+            }
+            #[cfg(windows)]
+            {
+                // Bulle : petite fenêtre transparente, toujours au premier plan, qui ne prend jamais le focus.
+                let bubble_window = tauri::WebviewWindowBuilder::new(app, "bubble", tauri::WebviewUrl::App("bubble.html".into()))
+                    .title("Coquille — bulle")
+                    .inner_size(30.0, 30.0)
+                    .decorations(false)
+                    .transparent(true)
+                    .shadow(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .resizable(false)
+                    .focusable(false)
+                    .focused(false)
+                    .visible(false)
+                    .build();
+                match bubble_window {
+                    Ok(_) => {
+                        let tx = bubble::spawn(handle.clone());
+                        *app.state::<AppState>().bubble_tx.lock().unwrap() = Some(tx);
+                    }
+                    Err(e) => eprintln!("Bulle indisponible : {e}"),
+                }
             }
             let argv: Vec<String> = std::env::args().collect();
             handle_args(&handle, &argv, true);
@@ -398,6 +559,14 @@ fn main() {
             save_config,
             add_to_dictionary,
             disable_rule,
+            suspend_shortcut,
+            resume_shortcut,
+            bubble_get_state,
+            bubble_expand,
+            bubble_apply,
+            bubble_ignore,
+            bubble_recheck,
+            bubble_open_editor,
             take_pending,
             copy_text,
             hide_window,

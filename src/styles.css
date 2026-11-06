@@ -315,3 +315,30 @@ ul.small { padding-left: 18px; margin: 6px 0 0; }
   .grid2 { grid-template-columns: 1fr; }
   #btn-fix-all { display: none; }
 }
+
+/* ---- Enregistreur de raccourci ---- */
+.shortcut-rec {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  text-align: left;
+}
+.shortcut-rec kbd {
+  font: 600 13px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  padding: 6px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  background: var(--surface);
+  white-space: nowrap;
+}
+.shortcut-rec span { color: var(--muted); font-size: 13px; }
+.shortcut-rec.recording { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.shortcut-rec.recording span { color: var(--accent); font-weight: 600; }
+.shortcut-rec.recording kbd { animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
+fieldset label.small { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }

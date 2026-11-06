@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Coquille — bulle</title>
+  <link rel="stylesheet" href="bubble.css">
+</head>
+<body>
+  <button id="badge" class="badge checking" type="button" aria-label="Corrections Coquille"><span id="count"></span></button>
+
+  <section id="panel" class="panel" hidden>
+    <header>
+      <img src="logo.svg" width="18" height="18" alt="">
+      <strong>Coquille</strong>
+      <span id="summary" class="summary"></span>
+      <span class="spacer"></span>
+      <button id="open" type="button" class="ghost" title="Ouvrir tout le texte du champ dans l'éditeur">Éditeur</button>
+      <button id="close" type="button" class="ghost icon" aria-label="Réduire">✕</button>
+    </header>
+    <div id="message" class="message" hidden></div>
+    <div id="list" class="list"></div>
+  </section>
+
+  <script src="bubble.js"></script>
+</body>
+</html>

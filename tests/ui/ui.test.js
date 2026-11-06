@@ -79,16 +79,35 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
     // Paramètres + saisie du raccourci
     await page.click('#btn-settings');
     await page.waitForSelector('dialog[open]');
-    await page.click('input[name=shortcut]');
+    assert.ok((await page.textContent('#shortcut-status')).includes('actif'));
+    await page.click('#shortcut-rec');
+    await page.waitForSelector('#shortcut-rec.recording');
+    assert.ok(await page.evaluate(() => window.__calls.some((c) => c[0] === 'suspend_shortcut')), 'raccourci suspendu');
+    await page.keyboard.press('Escape'); // annule l'enregistrement sans fermer la fenêtre
+    assert.ok(await page.evaluate(() => document.getElementById('settings').open), 'Échap ne ferme pas les paramètres');
+    assert.strictEqual(await page.textContent('#shortcut-keys'), 'Ctrl + Alt + Espace');
+    await page.click('#shortcut-rec');
+    await page.keyboard.press('KeyQ'); // aucune touche de modification -> refusé
+    assert.ok((await page.textContent('#shortcut-status')).includes('Ctrl, Alt ou Win'));
+    await page.keyboard.press('Shift+KeyQ'); // Maj seule -> refusé aussi
+    assert.ok(await page.isVisible('#shortcut-rec.recording'), 'toujours en enregistrement');
     await page.keyboard.press('Control+Alt+KeyK');
-    assert.strictEqual(await page.inputValue('input[name=shortcut]'), 'Ctrl+Alt+K');
+    assert.strictEqual(await page.textContent('#shortcut-keys'), 'Ctrl + Alt + K');
+    assert.ok((await page.textContent('#shortcut-status')).includes('Enregistrer'));
+    assert.ok(!(await page.isHidden('#bubble-settings')), 'options de la bulle visibles sous Windows');
     await page.click('#btn-test');
     await page.waitForFunction(() => document.getElementById('test-result').textContent.startsWith('Connexion réussie'));
     await page.screenshot({ path: `${OUT}/ui-settings.png` });
     await page.click('dialog button[type=submit]');
     await page.waitForSelector('dialog:not([open])', { state: 'attached' });
-    const saved = await page.evaluate(() => window.__calls.filter((c) => c[0] === 'save_config').pop()[1].config.shortcut);
-    assert.strictEqual(saved, 'Ctrl+Alt+K');
+    const saved = await page.evaluate(() => window.__calls.filter((c) => c[0] === 'save_config').pop()[1].config);
+    assert.strictEqual(saved.shortcut, 'Ctrl+Alt+K');
+    assert.strictEqual(saved.bubble, true);
+    assert.deepStrictEqual(saved.bubble_excluded_apps, ['KeePassXC.exe']);
+
+    // Ouverture depuis la bulle : champ entier
+    await page.evaluate(() => window.__emit('capture', { id: 3, text: 'Texte du champ', from_selection: true, mode: 'field', notice: null }));
+    await page.waitForFunction(() => document.getElementById('source').textContent === 'Champ capturé');
 
     // Petite fenêtre : pas de débordement horizontal
     await page.setViewportSize({ width: 640, height: 480 });
@@ -96,6 +115,36 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
     assert.ok(!overflow, 'pas de défilement horizontal à 640px');
     await page.close();
   }
+  // ---- Fenêtre « bulle » ----
+  const bpage = await browser.newPage({ viewport: { width: 30, height: 30 }, deviceScaleFactor: 2 });
+  bpage.on('pageerror', (e) => errors.push('bulle: ' + e.message));
+  await bpage.addInitScript({ path: path.join(__dirname, 'mock-tauri.js') });
+  const issue = (o) => ({ offset: 0, length: 7, original: 'Bonjoru', message: 'Faute de frappe possible trouvée.', short_message: '',
+    replacements: ['Bonjour', 'Bonjours'], rule_id: 'FR_SPELLING_RULE', rule_description: 'x', category: '', kind: 'orthographe', ...o });
+  await bpage.addInitScript(() => { window.__bubbleState = { status: 'checking', issues: [], error: null, message: null, expanded: false, stale: true, app: 'chrome.exe' }; });
+  await bpage.goto(PAGE.replace('index.html', 'bubble.html'));
+  await bpage.waitForSelector('#badge.checking');
+  const state = { status: 'issues', issues: [issue(), issue({ offset: 12, length: 3, original: 'est', kind: 'grammaire', replacements: ['sont'], rule_id: 'AGREEMENT' })],
+    error: null, message: null, expanded: false, stale: false, app: 'chrome.exe' };
+  await bpage.evaluate((s) => window.__emit('bubble-state', s), state);
+  assert.strictEqual(await bpage.textContent('#count'), '2');
+  await bpage.screenshot({ path: `${OUT}/bubble-badge.png` });
+  await bpage.click('#badge');
+  assert.ok(await bpage.evaluate(() => window.__calls.some((c) => c[0] === 'bubble_expand' && c[1].expanded)));
+  await bpage.setViewportSize({ width: 360, height: 430 });
+  await bpage.evaluate((s) => window.__emit('bubble-state', { ...s, expanded: true }), state);
+  await bpage.waitForSelector('#panel:not([hidden])');
+  assert.strictEqual(await bpage.locator('.card').count(), 2);
+  await bpage.screenshot({ path: `${OUT}/bubble-panel.png` });
+  await bpage.click('.card.grammaire .sugg');
+  const applied = await bpage.evaluate(() => window.__calls.filter((c) => c[0] === 'bubble_apply').pop()[1]);
+  assert.deepStrictEqual(applied, { offset: 12, length: 3, original: 'est', replacement: 'sont' });
+  await bpage.click('.card.orthographe >> text=Ignorer');
+  assert.ok(await bpage.evaluate(() => window.__calls.some((c) => c[0] === 'bubble_ignore' && c[1].ruleId === 'FR_SPELLING_RULE')));
+  await bpage.evaluate((s) => window.__emit('bubble-state', { ...s, status: 'ok', issues: [], expanded: false }), state);
+  assert.strictEqual(await bpage.textContent('#count'), '✓');
+  await bpage.close();
+
   await browser.close();
   if (errors.length) { console.error('Erreurs JS :', errors); process.exit(1); }
   console.log('UI OK');

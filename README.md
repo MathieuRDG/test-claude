@@ -83,11 +83,30 @@ Au premier raccourci, macOS demande l'autorisation **Accessibilité** (Réglages
 ## Utilisation
 
 1. Sélectionne du texte dans n'importe quelle application.
-2. Appuie sur le raccourci : **Ctrl+Alt+Espace** (Windows, Linux X11) ou **⌘+Maj+Espace** (macOS). Il se modifie dans ⚙.
+2. Appuie sur le raccourci : **Ctrl+Alt+Espace** (Windows, Linux X11) ou **⌘+Maj+Espace** (macOS). Si une autre application l'utilise déjà, Coquille choisit automatiquement une combinaison libre (par exemple **Ctrl+Alt+K**) et te l'indique. Pour le changer : ⚙ › Raccourci global › clique sur la touche affichée, puis appuie sur la combinaison voulue.
 3. Corrige : clique sur un mot souligné ou sur une carte à droite, puis sur une suggestion. **Tout corriger** applique la première suggestion de chaque faute, sauf les remarques de style.
 4. Appuie sur **Ctrl+Entrée** (⌘+Entrée) ou sur **Remplacer** : la fenêtre se masque et le texte corrigé remplace ta sélection.
 
 Échap ferme la fenêtre. Coquille reste dans la barre système ; un clic sur l'icône ouvre l'éditeur.
+
+### Bulle de correction en direct (Windows)
+
+Pas besoin d'ouvrir Coquille ni d'utiliser le raccourci : dès que tu écris au moins 3 mots dans un champ (navigateur, Discord, Outlook, Word, Bloc-notes…), une **pastille** apparaît au bord droit du champ, à la hauteur du curseur :
+
+- **rouge avec un chiffre** : nombre de fautes ;
+- **violette** : seulement des remarques de style ;
+- **verte ✓** : aucune faute ;
+- **grise** : vérification en cours.
+
+Un clic sur la pastille ouvre la liste des corrections. Un clic sur une suggestion **corrige directement le mot dans ton champ**, puis le curseur revient où il était. **Éditeur** ouvre tout le texte du champ dans la fenêtre principale.
+
+- La bulle ne prend jamais le focus : tu continues à taper normalement.
+- Elle ignore les **champs de mot de passe**, les barres d'adresse et les applications exclues (gestionnaires de mots de passe, terminaux, VS Code… ; liste modifiable dans ⚙).
+- Elle se désactive dans ⚙ › Bulle de correction en direct.
+- Elle s'appuie sur l'API d'accessibilité de Windows (UI Automation). Quelques applications n'exposent pas leur texte ; dans ce cas, utilise le raccourci.
+- Le texte des champs est envoyé au serveur LanguageTool configuré. Le serveur public limite le nombre de requêtes et ralentit donc la bulle : ton propre serveur est préférable.
+
+Linux et macOS : prévu plus tard. Sous Wayland, une application ne peut pas placer une fenêtre où elle veut, ce qui complique la chose.
 
 ### Raccourci sous Wayland (Hyprland, KDE, GNOME, Sway)
 
@@ -116,7 +135,8 @@ Avec ton serveur, tu peux aussi brancher l'**extension navigateur officielle Lan
 
 ## Limites connues
 
-- **Pas de soulignement en direct dans toutes les applications.** Grammarly y consacre des années de développement (API d'accessibilité spécifiques à chaque OS et application), et Wayland l'interdit tout bonnement. Coquille passe donc par un raccourci et une fenêtre, comme le correcteur d'Antidote. Pour le direct dans le navigateur, utilise l'extension LanguageTool branchée sur ton serveur.
+- **Correction en direct (bulle) : Windows uniquement pour l'instant.** Les mots ne sont pas soulignés à l'intérieur des autres applications (Grammarly y consacre des années de développement, application par application). La bulle indique les fautes et les corrige. Sous Linux et macOS, utilise le raccourci, ou l'extension LanguageTool branchée sur ton serveur pour le navigateur.
+- **Bulle et mise en forme** : une correction remplace seulement le mot visé. En revanche, « Éditeur » puis « Remplacer » recolle tout le champ en texte brut, ce qui fait perdre gras, liens, etc. dans les éditeurs riches.
 - **Terminaux** : ils collent avec Ctrl+Maj+V, donc le remplacement automatique n'y fonctionne pas. Utilise **Copier**.
 - **Presse-papiers** : seul son contenu *texte* est restauré après un remplacement. Une image copiée juste avant serait perdue.
 - **Windows et macOS** : le code se compile pour ces deux cibles, mais il n'a été exécuté que sous Linux (X11 et Wayland). Remonte-moi tout comportement anormal.
@@ -126,7 +146,8 @@ Avec ton serveur, tu peux aussi brancher l'**extension navigateur officielle Lan
 | Problème | Solution |
 |----------|----------|
 | Fenêtre blanche (Linux, NVIDIA) | Déjà contourné (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). Sinon, essaie `GDK_BACKEND=x11 coquille`. |
-| « Raccourci refusé » | Une autre application l'utilise déjà : choisis-en un autre dans ⚙. |
+| « … est déjà réservé par une autre application » | Un autre logiciel l'utilise déjà (lanceur, PowerToys, logiciel de clavier ou de capture…). Choisis-en un autre dans ⚙ › Raccourci global. |
+| La bulle n'apparaît pas | Vérifie qu'elle est activée dans ⚙, que le champ contient au moins 3 mots et que l'application n'est pas exclue. Les applications lancées en administrateur ne sont pas accessibles depuis une application normale. |
 | « Aucun texte sélectionné » (Wayland) | Vérifie que `wl-paste --primary` affiche bien ta sélection dans un terminal. |
 | « Serveur injoignable » | Teste l'adresse dans ⚙, puis vérifie Tailscale et `docker compose ps` sur le serveur. |
 | Code 429 | Le serveur public te limite : passe sur ton propre serveur. |
@@ -162,16 +183,17 @@ cd src-tauri && cargo test
 npm run test:ui
 ```
 
-**Installateurs Windows, macOS et Linux** : pousse un tag `v0.1.0` sur GitHub. Le workflow `.github/workflows/release.yml` compile sur les trois OS et crée un brouillon de release avec les installateurs.
+**Installateurs Windows, macOS et Linux** : pousse un tag `vX.Y.Z` sur GitHub, ou lance le workflow « Release » à la main dans l'onglet Actions. Le workflow `.github/workflows/release.yml` compile sur les trois OS et crée un brouillon de release avec les installateurs.
 
 ### Structure
 
 ```
-src/                 Interface (HTML/CSS/JS sans framework)
+src/                 Interface (HTML/CSS/JS sans framework) ; bubble.* = fenêtre de la bulle
 src-tauri/src/
   main.rs            Fenêtre, icône système, raccourci global, commandes
   langtool.rs        Client de l'API LanguageTool (/v2/check)
   selection.rs       Capture et remplacement de la sélection, par OS
+  bubble.rs          Bulle en direct (Windows, UI Automation)
   config.rs          Paramètres (JSON)
 server/              docker-compose LanguageTool + n-grammes FR
 packaging/arch/      PKGBUILD + fichier .desktop

@@ -1,0 +1,150 @@
+:root {
+  --surface: #ffffff;
+  --surface-2: #f1f2f7;
+  --border: #dfe1ea;
+  --text: #1d2030;
+  --muted: #6b7083;
+  --accent: #5b4ee6;
+  --accent-text: #ffffff;
+  --red: #e5484d;
+  --orange: #e88a12;
+  --blue: #2f7de1;
+  --purple: #9b51e0;
+  --green: #2f9e6e;
+  --grey: #8b8fa3;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1d1f27;
+    --surface-2: #262833;
+    --border: #343746;
+    --text: #e7e8ee;
+    --muted: #9a9db0;
+    --accent: #8b80ff;
+    --accent-text: #0f0f17;
+    --red: #ff6b70;
+    --orange: #ffa94d;
+    --blue: #5ea8ff;
+    --purple: #c08cff;
+    --green: #4cc38a;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---- Pastille ---- */
+.badge {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 800;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+  transition: transform .12s ease, opacity .2s ease;
+}
+.badge:hover { transform: scale(1.12); }
+.badge.issues { background: var(--red); }
+.badge.style { background: var(--purple); }
+.badge.ok { background: var(--green); }
+.badge.error { background: var(--orange); }
+.badge.checking { background: var(--grey); animation: pulse 1.2s ease-in-out infinite; }
+.badge.stale { opacity: .7; }
+@keyframes pulse { 50% { opacity: .55; } }
+body.expanded .badge { display: none; }
+
+/* ---- Panneau ---- */
+.panel {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(10, 12, 30, .28);
+  overflow: hidden;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.summary { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; }
+.ghost {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.ghost:hover { border-color: var(--accent); color: var(--accent); }
+.ghost.icon { padding: 3px 7px; }
+.message {
+  margin: 8px 10px 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--orange) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--orange) 40%, transparent);
+}
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.empty { margin: auto; text-align: center; color: var(--muted); padding: 20px; }
+.empty .big { display: block; font-size: 26px; color: var(--green); }
+.card {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--kind, var(--border));
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: var(--surface);
+}
+.card.orthographe { --kind: var(--red); }
+.card.grammaire { --kind: var(--orange); }
+.card.typographie { --kind: var(--blue); }
+.card.style { --kind: var(--purple); }
+.card-head { display: flex; gap: 7px; align-items: baseline; }
+.kind { font-size: 10.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--kind); }
+.orig { font-weight: 600; text-decoration: line-through; text-decoration-color: var(--kind); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg { font-size: 12.5px; margin-top: 2px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.sugg {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-weight: 700;
+}
+.sugg:hover { background: var(--accent); color: var(--accent-text); }
+.nosugg { color: var(--muted); font-size: 12px; font-style: italic; }
+.actions { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; }
+.actions button { border: 0; background: none; padding: 0; font-size: 11.5px; color: var(--muted); }
+.actions button:hover { color: var(--accent); text-decoration: underline; }

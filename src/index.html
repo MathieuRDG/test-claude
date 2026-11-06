@@ -73,8 +73,11 @@
       <fieldset>
         <legend>Raccourci global</legend>
         <div id="shortcut-native">
-          <input name="shortcut" type="text" readonly placeholder="Clique ici puis appuie sur la combinaison voulue">
-          <p class="small muted">Clique dans le champ et appuie sur la combinaison (au moins une touche de modification). Retour arrière pour effacer.</p>
+          <button type="button" id="shortcut-rec" class="shortcut-rec">
+            <kbd id="shortcut-keys"></kbd>
+            <span id="shortcut-hint">Cliquer pour changer</span>
+          </button>
+          <p id="shortcut-status" class="small"></p>
         </div>
         <div id="shortcut-wayland" hidden>
           <p class="small">Sous Wayland, les applications ne peuvent pas intercepter de raccourci global. Associe cette commande à un raccourci dans ton bureau :</p>
@@ -94,6 +97,19 @@
         <label class="check"><input name="picky" type="checkbox"> Mode exigeant (plus de remarques de style)</label>
         <label class="check"><input name="restore_clipboard" type="checkbox"> Restaurer le presse-papiers après le remplacement</label>
         <label class="check"><input name="autostart" type="checkbox"> Lancer Coquille à l'ouverture de session</label>
+      </fieldset>
+
+      <fieldset id="bubble-settings" hidden>
+        <legend>Bulle de correction en direct</legend>
+        <label class="check"><input name="bubble" type="checkbox"> Afficher une bulle à côté du champ où j'écris, dans toutes les applications</label>
+        <p class="small muted">
+          La bulle apparaît dès qu'un champ contient au moins 3 mots ; un clic affiche les corrections, un clic sur une suggestion corrige directement le mot.
+          Les champs de mot de passe et les barres d'adresse sont ignorés. Le texte des champs est envoyé au serveur LanguageTool configuré :
+          préfère ton propre serveur pour la confidentialité.
+        </p>
+        <label class="small">Applications exclues (nom de l'exécutable, une par ligne)
+          <textarea name="bubble_excluded_apps" rows="4" spellcheck="false" placeholder="KeePassXC.exe"></textarea>
+        </label>
       </fieldset>
 
       <div class="grid2">

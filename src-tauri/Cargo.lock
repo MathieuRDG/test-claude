@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "coquille"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "enigo",
@@ -568,6 +568,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-single-instance",
+ "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 
