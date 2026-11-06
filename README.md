@@ -43,7 +43,7 @@ Conséquences :
 ### Arch Linux
 
 ```bash
-git clone <ton-dépôt> coquille
+git clone https://github.com/MathieuRDG/test-claude.git coquille
 ```
 
 ```bash
