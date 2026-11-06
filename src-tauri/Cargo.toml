@@ -1,0 +1,46 @@
+[package]
+name = "coquille"
+version = "0.1.0"
+description = "Correcteur d'orthographe et de grammaire multiplateforme basé sur LanguageTool"
+authors = ["Coquille contributors"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# native-tls : utilise le magasin de certificats du système (pratique avec une CA interne de homelab)
+reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls", "charset", "http2"] }
+arboard = { version = "3", default-features = false }
+enigo = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_DataExchange",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+
+[features]
+# Les assets du frontend sont embarqués dans le binaire : `cargo build --release` suffit.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

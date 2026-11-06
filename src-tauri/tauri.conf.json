@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Coquille",
+  "version": "0.1.0",
+  "identifier": "org.coquille.correcteur",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Coquille — Correcteur",
+        "width": 1000,
+        "height": 640,
+        "minWidth": 640,
+        "minHeight": 420,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "publisher": "Coquille",
+    "shortDescription": "Correcteur d'orthographe et de grammaire",
+    "longDescription": "Coquille corrige l'orthographe, la grammaire et la typographie du texte sélectionné dans n'importe quelle application, grâce à un raccourci clavier global. Moteur : LanguageTool (public ou auto-hébergé).",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}

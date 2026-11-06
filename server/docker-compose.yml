@@ -1,0 +1,22 @@
+# Serveur LanguageTool auto-hébergé pour Coquille (et l'extension navigateur LanguageTool).
+# Image communautaire maintenue : https://github.com/Erikvl87/docker-languagetool
+#
+#   docker compose up -d
+#   curl -s -d "language=fr&text=Bonjoru les amis" http://localhost:8010/v2/check
+#
+# Aucune authentification : ne l'expose PAS sur Internet. Utilise Tailscale (voir README.md).
+services:
+  languagetool:
+    image: erikvl87/languagetool:latest
+    container_name: languagetool
+    restart: unless-stopped
+    ports:
+      # Remplace par "IP_TAILSCALE:8010:8010" pour n'écouter que sur ton tailnet.
+      - "8010:8010"
+    environment:
+      - Java_Xms=512m
+      - Java_Xmx=2g
+      # Décommente après avoir lancé ./get-ngrams-fr.sh (meilleure détection des confusions de mots) :
+      # - langtool_languageModel=/ngrams
+    volumes:
+      - ./ngrams:/ngrams:ro

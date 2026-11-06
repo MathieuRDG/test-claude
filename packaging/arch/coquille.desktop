@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Coquille
+GenericName=Correcteur orthographique
+Comment=Corrige l'orthographe, la grammaire et la typographie du texte sélectionné
+Exec=coquille
+Icon=coquille
+Terminal=false
+Categories=Office;Utility;TextTools;
+Keywords=orthographe;grammaire;correcteur;languagetool;spelling;grammar;
+StartupWMClass=coquille
+Actions=corriger;parametres;
+
+[Desktop Action corriger]
+Name=Corriger la sélection
+Exec=coquille --corriger
+
+[Desktop Action parametres]
+Name=Paramètres
+Exec=coquille --parametres

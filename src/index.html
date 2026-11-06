@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coquille — Correcteur</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand"><img src="logo.svg" alt="" width="22" height="22"><span>Coquille</span></div>
+    <span id="source" class="badge">Éditeur</span>
+    <button id="status" class="status" type="button" title="Vérifier maintenant"></button>
+    <div class="spacer"></div>
+    <select id="lang" title="Langue du texte"></select>
+    <button id="btn-fix-all" type="button" title="Appliquer la première suggestion de chaque faute (hors style)">Tout corriger</button>
+    <button id="btn-copy" type="button">Copier</button>
+    <button id="btn-apply" type="button" class="primary" hidden>Remplacer</button>
+    <button id="btn-settings" type="button" class="icon" title="Paramètres" aria-label="Paramètres">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6a.5.5 0 0 0 .1-.6l-2-3.5a.5.5 0 0 0-.6-.2l-2.5 1a7.4 7.4 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.5a.5.5 0 0 0 .1.6L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.6l2 3.5c.1.2.4.3.6.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.6c0 .3.2.4.5.4h4c.3 0 .5-.2.5-.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.5a.5.5 0 0 0-.1-.6L19.4 13ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>
+    </button>
+  </header>
+
+  <div id="notice" class="notice" hidden>
+    <span id="notice-text"></span>
+    <button id="notice-close" type="button" class="icon small" aria-label="Fermer">✕</button>
+  </div>
+
+  <main>
+    <section class="editor">
+      <div class="editor-wrap">
+        <div class="backdrop" id="backdrop" aria-hidden="true"><div id="highlights"></div></div>
+        <textarea id="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+          placeholder="Écris ou colle ton texte ici… ou sélectionne du texte dans n'importe quelle application et utilise le raccourci."></textarea>
+      </div>
+      <div class="editor-footer">
+        <span id="counts"></span>
+        <span id="hint" class="hint"></span>
+      </div>
+    </section>
+    <aside id="issues" class="issues" aria-label="Corrections proposées"></aside>
+  </main>
+
+  <div id="popover" class="popover" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <dialog id="settings">
+    <form id="settings-form" autocomplete="off">
+      <h2>Paramètres</h2>
+
+      <fieldset>
+        <legend>Serveur LanguageTool</legend>
+        <div class="row">
+          <input name="server_url" type="text" placeholder="https://api.languagetool.org" spellcheck="false">
+          <button type="button" id="btn-test">Tester</button>
+        </div>
+        <p id="test-result" class="small"></p>
+        <p class="small muted">
+          Le serveur public (<code>https://api.languagetool.org</code>) est gratuit mais limité en nombre de requêtes.
+          Pour un usage illimité et privé, héberge ton propre serveur (Docker, voir le dossier <code>server/</code>) et indique son adresse,
+          par exemple <code>http://100.x.y.z:8010</code> via Tailscale.
+          <button type="button" id="btn-public" class="link">Revenir au serveur public</button>
+        </p>
+        <details>
+          <summary>Compte LanguageTool Premium (facultatif)</summary>
+          <div class="grid2">
+            <label>Nom d'utilisateur (e-mail)<input name="username" type="text" spellcheck="false"></label>
+            <label>Clé API<input name="api_key" type="password" spellcheck="false"></label>
+          </div>
+        </details>
+      </fieldset>
+
+      <fieldset>
+        <legend>Raccourci global</legend>
+        <div id="shortcut-native">
+          <input name="shortcut" type="text" readonly placeholder="Clique ici puis appuie sur la combinaison voulue">
+          <p class="small muted">Clique dans le champ et appuie sur la combinaison (au moins une touche de modification). Retour arrière pour effacer.</p>
+        </div>
+        <div id="shortcut-wayland" hidden>
+          <p class="small">Sous Wayland, les applications ne peuvent pas intercepter de raccourci global. Associe cette commande à un raccourci dans ton bureau :</p>
+          <pre><code>coquille --corriger</code></pre>
+          <ul class="small muted">
+            <li>Hyprland : <code>bind = CTRL ALT, space, exec, coquille --corriger</code></li>
+            <li>Sway : <code>bindsym Ctrl+Alt+space exec coquille --corriger</code></li>
+            <li>KDE : Configuration › Clavier › Raccourcis › Ajouter une commande</li>
+            <li>GNOME : Paramètres › Clavier › Raccourcis personnalisés</li>
+          </ul>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Options</legend>
+        <label class="check"><input name="live" type="checkbox"> Vérifier pendant la frappe</label>
+        <label class="check"><input name="picky" type="checkbox"> Mode exigeant (plus de remarques de style)</label>
+        <label class="check"><input name="restore_clipboard" type="checkbox"> Restaurer le presse-papiers après le remplacement</label>
+        <label class="check"><input name="autostart" type="checkbox"> Lancer Coquille à l'ouverture de session</label>
+      </fieldset>
+
+      <div class="grid2">
+        <fieldset>
+          <legend>Dictionnaire personnel</legend>
+          <textarea name="dictionary" rows="6" spellcheck="false" placeholder="Un mot par ligne"></textarea>
+        </fieldset>
+        <fieldset>
+          <legend>Règles désactivées</legend>
+          <textarea name="disabled_rules" rows="6" spellcheck="false" placeholder="Un identifiant par ligne"></textarea>
+        </fieldset>
+      </div>
+
+      <p id="settings-error" class="error" role="alert"></p>
+      <div class="dialog-footer">
+        <span id="about" class="small muted"></span>
+        <div class="buttons">
+          <button type="button" id="btn-cancel">Annuler</button>
+          <button type="submit" class="primary">Enregistrer</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

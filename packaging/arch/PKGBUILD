@@ -1,0 +1,52 @@
+# PKGBUILD local : compile Coquille depuis ce dépôt.
+# Utilisation (depuis packaging/arch/) :
+#   makepkg -si
+# Pour publier sur l'AUR, remplacer la construction depuis $startdir par une source git/tarball.
+
+pkgname=coquille
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Correcteur d'orthographe et de grammaire (LanguageTool) avec raccourci global"
+arch=('x86_64' 'aarch64')
+url="https://github.com/A_REMPLACER/coquille"  # à mettre à jour avec ton dépôt
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'openssl' 'hicolor-icon-theme')
+makedepends=('cargo' 'pkgconf')
+optdepends=(
+  'wl-clipboard: requis sous Wayland (lecture de la sélection, presse-papiers)'
+  'wtype: collage automatique sous Hyprland, Sway et autres compositeurs wlroots'
+  'ydotool: collage automatique sous KDE Plasma ou GNOME (Wayland)'
+)
+options=('!lto' '!debug')
+
+_root="$startdir/../.."
+
+prepare() {
+  cd "$_root/src-tauri"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_root/src-tauri"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$_root/src-tauri"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo test --frozen --release
+}
+
+package() {
+  install -Dm755 "$srcdir/target/release/coquille" "$pkgdir/usr/bin/coquille"
+  install -Dm644 "$startdir/coquille.desktop" "$pkgdir/usr/share/applications/coquille.desktop"
+  install -Dm644 "$_root/src-tauri/icons/32x32.png" "$pkgdir/usr/share/icons/hicolor/32x32/apps/coquille.png"
+  install -Dm644 "$_root/src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/coquille.png"
+  install -Dm644 "$_root/src-tauri/icons/128x128@2x.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/coquille.png"
+  install -Dm644 "$_root/assets/logo.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/coquille.svg"
+  install -Dm644 "$_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
