@@ -97,6 +97,9 @@ pub struct Issue {
     pub category: String,
     /// "orthographe" | "grammaire" | "typographie" | "style"
     pub kind: String,
+    /// Identifiant stable attribué par la bulle (0 ailleurs) : permet de viser la bonne faute
+    /// même si les positions ont été décalées par une correction précédente.
+    pub key: u64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -160,6 +163,7 @@ fn convert(text: &str, resp: LtResponse, cfg: &Config) -> CheckResult {
                 rule_description: m.rule.description,
                 category: cat_name,
                 kind,
+                key: 0,
             })
         })
         .collect();

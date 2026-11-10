@@ -100,6 +100,8 @@ Pas besoin d'ouvrir Coquille ni d'utiliser le raccourci : dès que tu écris au 
 
 Un clic sur la pastille ouvre la liste des corrections. Un clic sur une suggestion **corrige directement le mot dans ton champ**, puis le curseur revient où il était. **Éditeur** ouvre tout le texte du champ dans la fenêtre principale.
 
+Les corrections s'appuient sur l'analyse de la phrase d'origine, gardée en mémoire. Corriger un mot ne relance pas la vérification : les autres suggestions restent en place et tu peux les enchaîner. La phrase n'est réanalysée que si tu tapes toi-même du texte, ou quand toutes les corrections sont faites (vérification de contrôle). Le bouton **↻** force une nouvelle analyse. L'éditeur principal fonctionne de la même façon : clique sur le compteur de fautes pour revérifier.
+
 - La bulle ne prend jamais le focus : tu continues à taper normalement.
 - Elle ignore les **champs de mot de passe**, les barres d'adresse et les applications exclues (gestionnaires de mots de passe, terminaux, VS Code… ; liste modifiable dans ⚙).
 - Elle se désactive dans ⚙ › Bulle de correction en direct.

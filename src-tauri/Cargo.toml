@@ -1,6 +1,6 @@
 [package]
 name = "coquille"
-version = "0.2.0"
+version = "0.2.1"
 description = "Correcteur d'orthographe et de grammaire multiplateforme basé sur LanguageTool"
 authors = ["Coquille contributors"]
 license = "MIT"

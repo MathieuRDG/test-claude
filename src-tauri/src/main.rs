@@ -369,8 +369,18 @@ fn bubble_expand(state: State<AppState>, expanded: bool) {
 }
 
 #[tauri::command]
-fn bubble_apply(state: State<AppState>, offset: usize, length: usize, original: String, replacement: String) {
-    send_bubble(&state, bubble::Command::Apply { offset, length, original, replacement });
+fn bubble_apply(state: State<AppState>, key: u64, replacement: String) {
+    send_bubble(&state, bubble::Command::Apply { key, replacement });
+}
+
+#[tauri::command]
+fn bubble_drop_rule(state: State<AppState>, rule_id: String) {
+    send_bubble(&state, bubble::Command::DropRule(rule_id));
+}
+
+#[tauri::command]
+fn bubble_drop_word(state: State<AppState>, word: String) {
+    send_bubble(&state, bubble::Command::DropWord(word));
 }
 
 #[tauri::command]
@@ -564,6 +574,8 @@ fn main() {
             bubble_get_state,
             bubble_expand,
             bubble_apply,
+            bubble_drop_rule,
+            bubble_drop_word,
             bubble_ignore,
             bubble_recheck,
             bubble_open_editor,

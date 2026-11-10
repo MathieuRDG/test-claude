@@ -28,11 +28,34 @@ pub struct BubbleState {
 /// Ordres envoyés au thread de surveillance par l'interface de la bulle.
 #[derive(Debug)]
 pub enum Command {
-    Apply { offset: usize, length: usize, original: String, replacement: String },
+    /// Applique une suggestion à la faute identifiée par sa clé.
+    Apply { key: u64, replacement: String },
     Expand(bool),
     Ignore { rule_id: String, original: String },
+    /// Retire localement les fautes d'une règle désactivée (sans revérifier).
+    DropRule(String),
+    /// Retire localement les fautes d'orthographe d'un mot ajouté au dictionnaire.
+    DropWord(String),
     Recheck,
     OpenEditor,
+}
+
+/// Met à jour la liste des fautes après le remplacement de `[offset, offset+length)` par
+/// `repl_len` unités : les fautes suivantes sont décalées, celles qui chevauchent la zone
+/// remplacée disparaissent. L'analyse de la phrase d'origine est conservée telle quelle :
+/// pas de nouvelle vérification, donc pas de liste qui se réorganise à chaque clic.
+pub fn rebase_issues(issues: Vec<Issue>, offset: usize, length: usize, repl_len: usize) -> Vec<Issue> {
+    let end = offset + length;
+    issues
+        .into_iter()
+        .filter(|i| i.offset + i.length <= offset || i.offset >= end)
+        .map(|mut i| {
+            if i.offset >= end {
+                i.offset = i.offset + repl_len - length;
+            }
+            i
+        })
+        .collect()
 }
 
 /// Nombre de mots minimal pour vérifier un champ : évite d'analyser barres d'adresse et recherches.
@@ -163,6 +186,7 @@ mod imp {
         last_pos: Option<(i32, i32)>,
         message: Option<(String, Instant)>,
         last_emitted: Option<BubbleState>,
+        next_key: u64,
     }
 
     pub fn spawn(app: AppHandle) -> Sender<Command> {
@@ -194,6 +218,7 @@ mod imp {
             last_pos: None,
             message: None,
             last_emitted: None,
+            next_key: 0,
         };
         loop {
             match rx.recv_timeout(POLL) {
@@ -498,6 +523,7 @@ mod imp {
             let http = self.app.state::<AppState>().http.clone();
             let result = tauri::async_runtime::block_on(langtool::check(&http, cfg, &text, ""));
             let ignored = &self.ignored;
+            let next_key = &mut self.next_key;
             let Some(f) = self.field.as_mut() else { return };
             match result {
                 Ok(r) => {
@@ -505,6 +531,11 @@ mod imp {
                         .issues
                         .into_iter()
                         .filter(|i| !ignored.contains(&(i.rule_id.clone(), i.original.clone())))
+                        .map(|mut i| {
+                            *next_key += 1;
+                            i.key = *next_key;
+                            i
+                        })
                         .collect();
                     f.error = None;
                     f.checked_text = Some(text);
@@ -628,18 +659,55 @@ mod imp {
                     }
                     self.last_request = None;
                 }
-                Command::Apply { offset, length, original, replacement } => {
-                    let result = self.apply(offset, length, &original, &replacement);
+                Command::DropRule(rule_id) => {
                     if let Some(f) = self.field.as_mut() {
-                        // Revérification rapide du texte modifié.
-                        f.changed_at = ago(DEBOUNCE - Duration::from_millis(250));
-                        if result.is_ok() {
-                            f.issues.retain(|i| !(i.offset == offset && i.original == original));
-                        }
+                        f.issues.retain(|i| i.rule_id != rule_id);
                     }
-                    self.last_request = None;
-                    if let Err(e) = result {
-                        self.message = Some((e, Instant::now()));
+                }
+                Command::DropWord(word) => {
+                    if let Some(f) = self.field.as_mut() {
+                        f.issues.retain(|i| !(i.kind == "orthographe" && i.original.eq_ignore_ascii_case(&word)));
+                    }
+                }
+                Command::Apply { key, replacement } => {
+                    let target = self
+                        .field
+                        .as_ref()
+                        .and_then(|f| f.issues.iter().find(|i| i.key == key))
+                        .map(|i| (i.offset, i.length, i.original.clone()));
+                    let Some((offset, length, original)) = target else {
+                        self.emit();
+                        return;
+                    };
+                    match self.apply(offset, length, &original, &replacement) {
+                        Ok(before) => {
+                            let Some(f) = self.field.as_mut() else { return };
+                            let repl_len = replacement.encode_utf16().count();
+                            f.issues = rebase_issues(std::mem::take(&mut f.issues), offset, length, repl_len);
+                            if let Some(after) = splice_utf16(&before, offset, length, &replacement) {
+                                // Le texte corrigé hérite de l'analyse de la phrase d'origine :
+                                // il est considéré comme vérifié, aucune nouvelle requête n'est lancée.
+                                if f.checked_text.as_deref() == Some(before.as_str()) {
+                                    f.checked_text = Some(after.clone());
+                                }
+                                f.text = after;
+                            }
+                            if f.issues.is_empty() {
+                                // Toutes les corrections sont faites : une dernière vérification
+                                // confirme le résultat (ou signale une faute apparue entre-temps).
+                                f.checked_text = None;
+                                f.changed_at = ago(DEBOUNCE - Duration::from_millis(300));
+                            }
+                        }
+                        Err((msg, stale)) => {
+                            if stale {
+                                if let Some(f) = self.field.as_mut() {
+                                    f.checked_text = None;
+                                    f.changed_at = ago(DEBOUNCE);
+                                }
+                            }
+                            self.message = Some((msg, Instant::now()));
+                        }
                     }
                 }
                 Command::OpenEditor => {
@@ -654,21 +722,25 @@ mod imp {
             self.emit();
         }
 
-        fn apply(&mut self, offset: usize, length: usize, original: &str, replacement: &str) -> Result<(), String> {
-            let f = self.field.as_ref().ok_or("Le champ n'est plus actif.")?;
+        /// Corrige le mot dans le champ. Renvoie le texte du champ juste avant la correction.
+        /// En cas d'échec : (message, faut-il revérifier le texte ?).
+        fn apply(&mut self, offset: usize, length: usize, original: &str, replacement: &str) -> Result<String, (String, bool)> {
+            let f = self.field.as_ref().ok_or(("Le champ n'est plus actif.".to_string(), false))?;
             let (el, hwnd) = (f.element.clone(), f.hwnd);
+            let fail = |msg: &str| (msg.to_string(), false);
+            let fail_e = |e: windows::core::Error| (e.to_string(), false);
             unsafe {
-                let current = read_text(&el).ok_or("Impossible de relire le texte du champ.")?;
+                let current = read_text(&el).ok_or_else(|| fail("Impossible de relire le texte du champ."))?;
                 let units: Vec<u16> = current.encode_utf16().collect();
                 if langtool::utf16_slice(&units, offset, length).as_deref() != Some(original) {
-                    return Err("Le texte a changé depuis la vérification : nouvelle vérification en cours.".into());
+                    return Err(("Le texte a changé depuis la vérification : nouvelle vérification en cours.".into(), true));
                 }
                 SetForegroundWindow(hwnd as _);
                 let _ = el.SetFocus();
                 sleep(Duration::from_millis(60));
 
                 if let Some(tp) = text_pattern(&el) {
-                    let doc = tp.DocumentRange().map_err(|e| e.to_string())?;
+                    let doc = tp.DocumentRange().map_err(fail_e)?;
                     let caret = text_before_caret(&tp, &doc).map(|t| t.encode_utf16().count());
                     let prefix = String::from_utf16_lossy(&units[..offset]);
                     // Selon l'application, un « caractère » UI Automation n'a pas la même taille :
@@ -678,17 +750,17 @@ mod imp {
                         let (start, len) = (count_units(&prefix, u), count_units(original, u));
                         if let Some(r) = range_at(&doc, start, len) {
                             if r.GetText(-1).map(|t| t.to_string()).ok().as_deref() == Some(original) {
-                                r.Select().map_err(|e| e.to_string())?;
+                                r.Select().map_err(fail_e)?;
                                 chosen = Some(u);
                                 break;
                             }
                         }
                     }
                     let Some(u) = chosen else {
-                        return Err("Impossible de cibler ce mot dans cette application : utilise « Ouvrir dans l'éditeur ».".into());
+                        return Err(fail("Impossible de cibler ce mot dans cette application : utilise « Ouvrir dans l'éditeur »."));
                     };
                     sleep(Duration::from_millis(40));
-                    type_text(replacement)?;
+                    type_text(replacement).map_err(|e| (e, false))?;
                     // On remet le curseur là où l'utilisateur écrivait.
                     if let Some(c) = caret {
                         let new_caret = shift_caret(c, offset, length, replacement.encode_utf16().count());
@@ -701,12 +773,13 @@ mod imp {
                             }
                         }
                     }
-                    Ok(())
+                    Ok(current)
                 } else if let Some(vp) = value_pattern(&el) {
-                    let new_text = splice_utf16(&current, offset, length, replacement).ok_or("Position invalide.")?;
-                    vp.SetValue(&BSTR::from(new_text.as_str())).map_err(|e| e.to_string())
+                    let new_text = splice_utf16(&current, offset, length, replacement).ok_or_else(|| fail("Position invalide."))?;
+                    vp.SetValue(&BSTR::from(new_text.as_str())).map_err(fail_e)?;
+                    Ok(current)
                 } else {
-                    Err("Ce champ ne permet pas la correction directe : utilise « Ouvrir dans l'éditeur ».".into())
+                    Err(fail("Ce champ ne permet pas la correction directe : utilise « Ouvrir dans l'éditeur »."))
                 }
             }
         }
@@ -726,6 +799,37 @@ mod tests {
         assert_eq!(count_units(s, Units::Utf16), 6);
         assert_eq!(count_units(s, Units::Scalar), 5);
         assert_eq!(count_units(s, Units::CrLfAsOne), 5);
+    }
+
+    fn issue(offset: usize, length: usize, original: &str, key: u64) -> Issue {
+        Issue {
+            offset,
+            length,
+            original: original.into(),
+            message: String::new(),
+            short_message: String::new(),
+            replacements: vec![],
+            rule_id: "R".into(),
+            rule_description: String::new(),
+            category: String::new(),
+            kind: "orthographe".into(),
+            key,
+        }
+    }
+
+    #[test]
+    fn rebase_keeps_original_analysis() {
+        // "Bonjoru les amis est la ?" : on corrige « est » -> « sont » (+1 unité)
+        let issues = vec![issue(0, 7, "Bonjoru", 1), issue(17, 3, "est", 2), issue(23, 2, " ?", 3)];
+        let after = rebase_issues(issues, 17, 3, 4);
+        let got: Vec<(u64, usize)> = after.iter().map(|i| (i.key, i.offset)).collect();
+        assert_eq!(got, vec![(1, 0), (3, 24)]);
+        let text = splice_utf16("Bonjoru les amis est la ?", 17, 3, "sont").unwrap();
+        let units: Vec<u16> = text.encode_utf16().collect();
+        assert_eq!(crate::langtool::utf16_slice(&units, 24, 2).unwrap(), " ?");
+        // puis « Bonjoru » -> « Bonjour » (même longueur) : rien ne bouge
+        let after = rebase_issues(after, 0, 7, 7);
+        assert_eq!(after.iter().map(|i| (i.key, i.offset)).collect::<Vec<_>>(), vec![(3, 24)]);
     }
 
     #[test]

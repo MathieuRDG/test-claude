@@ -35,11 +35,19 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForSelector('#popover:not([hidden])');
     await page.screenshot({ path: `${OUT}/ui-popover.png` });
+    const checksBefore = await page.evaluate(() => window.__calls.filter((c) => c[0] === 'check_text').length);
     await page.click('#popover .sugg >> text=Bonjour');
     assert.ok((await page.inputValue('#text')).startsWith('Bonjour les amis'));
-    // Le soulignement des autres fautes doit suivre le décalage avant même la revérification.
-    const est = await page.$$eval('#highlights mark', (ms) => ms.map((m) => m.textContent));
-    assert.ok(est.includes('est') && !est.includes('Bonjoru'), 'rebase ok: ' + est);
+    // Les autres fautes restent soulignées au bon endroit, sans nouvelle vérification.
+    assert.deepStrictEqual(await page.$$eval('#highlights mark', (ms) => ms.map((m) => m.textContent)), ['est', ' ?', 'Proxmocks', 'très très']);
+    await page.click('#issues .card.grammaire');
+    await page.click('#issues .card.grammaire .sugg');
+    assert.ok((await page.inputValue('#text')).startsWith('Bonjour les amis sont là'));
+    assert.deepStrictEqual(await page.$$eval('#highlights mark', (ms) => ms.map((m) => m.textContent)), [' ?', 'Proxmocks', 'très très']);
+    await page.waitForTimeout(1300);
+    assert.strictEqual(await page.evaluate(() => window.__calls.filter((c) => c[0] === 'check_text').length), checksBefore,
+      'aucune revérification après une correction');
+    await page.keyboard.press('Control+z');
 
     // Annulation via Ctrl+Z conservée
     await page.keyboard.press('Control+z');
@@ -54,10 +62,19 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
     await page.waitForFunction(() => document.querySelectorAll('#issues .card').length === 4);
 
     // Tout corriger (hors style)
+    const beforeFix = await page.evaluate(() => window.__calls.filter((c) => c[0] === 'check_text').length);
     await page.click('#btn-fix-all');
     const fixed = await page.inputValue('#text');
     assert.strictEqual(fixed, 'Bonjour les amis sont là ? Mon serveur Proxmocks est très très rapide.');
     await page.waitForFunction(() => document.querySelectorAll('#issues .card').length === 1);
+    assert.deepStrictEqual(await page.$$eval('#highlights mark', (ms) => ms.map((m) => m.textContent)), ['très très']);
+    await page.waitForTimeout(1000);
+    assert.strictEqual(await page.evaluate(() => window.__calls.filter((c) => c[0] === 'check_text').length), beforeFix);
+    // Dernière correction appliquée : une vérification de contrôle est lancée.
+    await page.click('#issues .card.style');
+    await page.click('#issues .card.style .sugg');
+    await page.waitForFunction((n) => window.__calls.filter((c) => c[0] === 'check_text').length === n + 1, beforeFix);
+    await page.waitForFunction(() => document.getElementById('status').textContent === 'Aucune faute');
 
     // Capture depuis une autre application
     await page.evaluate(() => window.__emit('capture', { id: 1, text: 'Les amis est contents ?', from_selection: true, notice: null }));
@@ -120,11 +137,11 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
   bpage.on('pageerror', (e) => errors.push('bulle: ' + e.message));
   await bpage.addInitScript({ path: path.join(__dirname, 'mock-tauri.js') });
   const issue = (o) => ({ offset: 0, length: 7, original: 'Bonjoru', message: 'Faute de frappe possible trouvée.', short_message: '',
-    replacements: ['Bonjour', 'Bonjours'], rule_id: 'FR_SPELLING_RULE', rule_description: 'x', category: '', kind: 'orthographe', ...o });
+    replacements: ['Bonjour', 'Bonjours'], rule_id: 'FR_SPELLING_RULE', rule_description: 'x', category: '', kind: 'orthographe', key: 1, ...o });
   await bpage.addInitScript(() => { window.__bubbleState = { status: 'checking', issues: [], error: null, message: null, expanded: false, stale: true, app: 'chrome.exe' }; });
   await bpage.goto(PAGE.replace('index.html', 'bubble.html'));
   await bpage.waitForSelector('#badge.checking');
-  const state = { status: 'issues', issues: [issue(), issue({ offset: 12, length: 3, original: 'est', kind: 'grammaire', replacements: ['sont'], rule_id: 'AGREEMENT' })],
+  const state = { status: 'issues', issues: [issue(), issue({ offset: 12, length: 3, original: 'est', kind: 'grammaire', replacements: ['sont'], rule_id: 'AGREEMENT', key: 2 })],
     error: null, message: null, expanded: false, stale: false, app: 'chrome.exe' };
   await bpage.evaluate((s) => window.__emit('bubble-state', s), state);
   assert.strictEqual(await bpage.textContent('#count'), '2');
@@ -138,7 +155,11 @@ const PAGE = 'file://' + path.resolve(__dirname, '../../src/index.html');
   await bpage.screenshot({ path: `${OUT}/bubble-panel.png` });
   await bpage.click('.card.grammaire .sugg');
   const applied = await bpage.evaluate(() => window.__calls.filter((c) => c[0] === 'bubble_apply').pop()[1]);
-  assert.deepStrictEqual(applied, { offset: 12, length: 3, original: 'est', replacement: 'sont' });
+  assert.deepStrictEqual(applied, { key: 2, replacement: 'sont' });
+  await bpage.click('#recheck');
+  assert.ok(await bpage.evaluate(() => window.__calls.some((c) => c[0] === 'bubble_recheck')));
+  await bpage.click('.card.orthographe >> text=Ajouter au dictionnaire');
+  await bpage.waitForFunction(() => window.__calls.some((c) => c[0] === 'bubble_drop_word' && c[1].word === 'Bonjoru'));
   await bpage.click('.card.orthographe >> text=Ignorer');
   assert.ok(await bpage.evaluate(() => window.__calls.some((c) => c[0] === 'bubble_ignore' && c[1].ruleId === 'FR_SPELLING_RULE')));
   await bpage.evaluate((s) => window.__emit('bubble-state', { ...s, status: 'ok', issues: [], expanded: false }), state);

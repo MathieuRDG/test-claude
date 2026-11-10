@@ -53,6 +53,9 @@ let captureMode = 'selection';
 let lastCaptureId = 0;
 let pendingShortcut = null;
 let recording = false;
+// Correction appliquée par Coquille elle-même : la liste des fautes est déjà à jour
+// (décalée), on garde l'analyse de la phrase d'origine sans relancer de vérification.
+let selfEdit = null;
 const ignored = new Set();
 
 const isMac = () => platform.os === 'macos';
@@ -316,33 +319,66 @@ function replaceRange(start, end, value) {
   syncScroll();
 }
 
+// Fautes restantes après remplacement de [start, start+oldLen) par newLen caractères :
+// celles qui suivent sont décalées, celles qui chevauchent la zone disparaissent.
+function shiftIssues(list, start, oldLen, newLen) {
+  const end = start + oldLen;
+  return list
+    .filter((i) => i.offset + i.length <= start || i.offset >= end)
+    .map((i) => (i.offset >= end ? { ...i, offset: i.offset + newLen - oldLen } : i));
+}
+
+// Applique une correction en conservant l'analyse d'origine (pas de nouvelle vérification).
+function applyEdit(start, end, value, remaining) {
+  selfEdit = { issues: remaining };
+  try {
+    replaceRange(start, end, value);
+  } finally {
+    selfEdit = null;
+  }
+  if (issues !== remaining) {
+    // Aucun événement « input » n'a été émis : on met la liste à jour nous-mêmes.
+    issues = remaining;
+    lastText = el.text.value;
+    render();
+  }
+  // Plus rien à corriger : une vérification de contrôle confirme le résultat.
+  if (!remaining.length) scheduleCheck(600);
+}
+
 function applyReplacement(i, value) {
   if (el.text.value.slice(i.offset, i.offset + i.length) !== i.original) { runCheck(); return; }
   hidePopover();
   activeKey = null;
-  replaceRange(i.offset, i.offset + i.length, value);
+  const remaining = shiftIssues(issues.filter((x) => x !== i), i.offset, i.length, value.length);
+  applyEdit(i.offset, i.offset + i.length, value, remaining);
 }
 
 function fixAll() {
   const text = el.text.value;
-  let out = '';
+  const applied = [];
   let pos = 0;
-  let n = 0;
   for (const i of sortedIssues()) {
     if (!i.replacements.length || i.kind === 'style' || i.offset < pos) continue;
     if (text.slice(i.offset, i.offset + i.length) !== i.original) continue;
-    out += text.slice(pos, i.offset) + i.replacements[0];
+    applied.push(i);
     pos = i.offset + i.length;
-    n++;
   }
-  if (!n) return;
-  out += text.slice(pos);
+  if (!applied.length) return;
+  // Remplacements de la fin vers le début : les positions des précédents restent valables.
+  let out = text;
+  let remaining = issues;
+  for (const i of applied.reverse()) {
+    const rep = i.replacements[0];
+    out = out.slice(0, i.offset) + rep + out.slice(i.offset + i.length);
+    remaining = shiftIssues(remaining, i.offset, i.length, rep.length);
+  }
   hidePopover();
+  activeKey = null;
   const caret = el.text.selectionStart;
-  replaceRange(0, text.length, out);
+  applyEdit(0, text.length, out, remaining);
   el.text.setSelectionRange(Math.min(caret, out.length), Math.min(caret, out.length));
-  toast(`${plural(n, 'correction appliquée', 'corrections appliquées')} — ${modLabel()}+Z pour annuler`);
-  if (!config.live) runCheck();
+  toast(`${plural(applied.length, 'correction appliquée', 'corrections appliquées')} — ${modLabel()}+Z pour annuler`);
 }
 
 function ignoreIssue(i) {
@@ -679,6 +715,13 @@ function onRecordKey(e) {
 function bindEvents() {
   el.text.addEventListener('input', () => {
     const now = el.text.value;
+    if (selfEdit) {
+      issues = selfEdit.issues;
+      lastText = now;
+      hidePopover();
+      render();
+      return;
+    }
     rebase(lastText, now);
     lastText = now;
     hidePopover();

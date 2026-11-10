@@ -4,7 +4,7 @@
 # Pour publier sur l'AUR, remplacer la construction depuis $startdir par une source git/tarball.
 
 pkgname=coquille
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="Correcteur d'orthographe et de grammaire (LanguageTool) avec raccourci global"
 arch=('x86_64' 'aarch64')

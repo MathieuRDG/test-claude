@@ -32,7 +32,7 @@ function card(i) {
     for (const r of i.replacements) {
       sugg.append(h('button', {
         type: 'button', class: 'sugg', text: displaySuggestion(r), title: `Remplacer par « ${r} »`,
-        onclick: () => invoke('bubble_apply', { offset: i.offset, length: i.length, original: i.original, replacement: r }),
+        onclick: () => invoke('bubble_apply', { key: i.key, replacement: r }),
       }));
     }
   } else {
@@ -43,12 +43,12 @@ function card(i) {
     i.kind === 'orthographe'
       ? h('button', {
         type: 'button', text: 'Ajouter au dictionnaire',
-        onclick: async () => { await invoke('add_to_dictionary', { word: i.original }); invoke('bubble_recheck'); },
+        onclick: async () => { await invoke('add_to_dictionary', { word: i.original }); invoke('bubble_drop_word', { word: i.original }); },
       })
       : null,
     h('button', {
       type: 'button', text: 'Désactiver la règle', title: `${i.rule_id} — ${i.rule_description}`,
-      onclick: async () => { await invoke('disable_rule', { ruleId: i.rule_id }); invoke('bubble_recheck'); },
+      onclick: async () => { await invoke('disable_rule', { ruleId: i.rule_id }); invoke('bubble_drop_rule', { ruleId: i.rule_id }); },
     }),
   ]);
   return h('div', { class: `card ${i.kind}` }, [
@@ -98,6 +98,7 @@ function render(s) {
 $('badge').addEventListener('click', () => invoke('bubble_expand', { expanded: true }));
 $('close').addEventListener('click', () => invoke('bubble_expand', { expanded: false }));
 $('open').addEventListener('click', () => invoke('bubble_open_editor'));
+$('recheck').addEventListener('click', () => invoke('bubble_recheck'));
 
 (async () => {
   await listen('bubble-state', (e) => render(e.payload));
