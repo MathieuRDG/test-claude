@@ -94,6 +94,17 @@ pub fn splice_utf16(text: &str, offset: usize, length: usize, replacement: &str)
     Some(out)
 }
 
+/// Rang de l'occurrence de `needle` qui commence à `offset` (UTF-16) parmi ses occurrences
+/// successives (sans chevauchement) dans `text` ; `None` si aucune ne commence là.
+pub fn occurrence_index(text: &str, offset: usize, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
+    }
+    text.match_indices(needle)
+        .map(|(byte, _)| text[..byte].encode_utf16().count())
+        .position(|start| start == offset)
+}
+
 /// Nouvelle position du curseur (UTF-16) après remplacement de `[offset, offset+length)`.
 pub fn shift_caret(caret: usize, offset: usize, length: usize, repl_len: usize) -> usize {
     if caret >= offset + length {
@@ -347,6 +358,52 @@ mod imp {
                 r.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, start as i32).ok()?;
             }
             Some(r)
+        }
+    }
+
+    /// Cherche la n-ième occurrence de `needle` dans le document (indépendant de la façon dont
+    /// l'application compte les sauts de ligne entre paragraphes).
+    unsafe fn find_occurrence(doc: &IUIAutomationTextRange, needle: &str, nth: usize) -> Option<IUIAutomationTextRange> {
+        unsafe {
+            let search = doc.Clone().ok()?;
+            let text = BSTR::from(needle);
+            for k in 0..=nth {
+                let found = search.FindText(&text, false, false).ok()?;
+                if k == nth {
+                    return Some(found);
+                }
+                search.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &found, TextPatternRangeEndpoint_End).ok()?;
+            }
+            None
+        }
+    }
+
+    /// Déplace le curseur (plage vide) de `delta` caractères, vers l'avant ou l'arrière.
+    unsafe fn move_caret(tp: &IUIAutomationTextPattern, delta: i32) {
+        unsafe {
+            let Ok(selection) = tp.GetSelection() else { return };
+            let Ok(r) = selection.GetElement(0) else { return };
+            let (first, second) = if delta >= 0 {
+                (TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start)
+            } else {
+                (TextPatternRangeEndpoint_Start, TextPatternRangeEndpoint_End)
+            };
+            if r.MoveEndpointByUnit(first, TextUnit_Character, delta).is_ok()
+                && r.MoveEndpointByUnit(second, TextUnit_Character, delta).is_ok()
+            {
+                let _ = r.Select();
+            }
+        }
+    }
+
+    /// Place le curseur à la toute fin du document.
+    unsafe fn caret_at_end(doc: &IUIAutomationTextRange) {
+        unsafe {
+            if let Ok(r) = doc.Clone() {
+                if r.MoveEndpointByRange(TextPatternRangeEndpoint_Start, &r, TextPatternRangeEndpoint_End).is_ok() {
+                    let _ = r.Select();
+                }
+            }
         }
     }
 
@@ -756,20 +813,47 @@ mod imp {
                             }
                         }
                     }
+                    // Éditeurs riches (navigateurs, plusieurs paragraphes) : les sauts de ligne entre
+                    // paragraphes ne sont pas comptés comme dans le texte renvoyé, les positions se
+                    // décalent. On cherche alors le mot lui-même, à la bonne occurrence.
+                    if chosen.is_none() {
+                        if let Some(nth) = occurrence_index(&current, offset, original) {
+                            if let Some(r) = find_occurrence(&doc, original, nth) {
+                                if r.GetText(-1).map(|t| t.to_string()).ok().as_deref() == Some(original) {
+                                    r.Select().map_err(fail_e)?;
+                                    chosen = Some(Units::Utf16);
+                                }
+                            }
+                        }
+                    }
                     let Some(u) = chosen else {
-                        return Err(fail("Impossible de cibler ce mot dans cette application : utilise « Ouvrir dans l'éditeur »."));
+                        return Err(fail(
+                            "Impossible de retrouver ce mot dans le champ : clique sur ↻ pour revérifier, ou utilise « Éditeur ».",
+                        ));
                     };
                     sleep(Duration::from_millis(40));
                     type_text(replacement).map_err(|e| (e, false))?;
-                    // On remet le curseur là où l'utilisateur écrivait.
+                    // On remet le curseur là où l'utilisateur écrivait. Après la frappe, il se trouve
+                    // juste après le mot corrigé : on le déplace de la distance qui l'en séparait.
                     if let Some(c) = caret {
-                        let new_caret = shift_caret(c, offset, length, replacement.encode_utf16().count());
+                        let repl_len = replacement.encode_utf16().count();
+                        let after_word = offset + repl_len;
+                        let new_caret = shift_caret(c, offset, length, repl_len);
                         sleep(Duration::from_millis(60));
-                        if let (Some(new_text), Ok(doc)) = (read_text(&el), tp.DocumentRange()) {
-                            let nu: Vec<u16> = new_text.encode_utf16().collect();
-                            let pre = String::from_utf16_lossy(&nu[..new_caret.min(nu.len())]);
-                            if let Some(r) = range_at(&doc, count_units(&pre, u), 0) {
-                                let _ = r.Select();
+                        if new_caret != after_word {
+                            if let Some(new_text) = read_text(&el) {
+                                let nu: Vec<u16> = new_text.encode_utf16().collect();
+                                let (lo, hi) = (new_caret.min(after_word).min(nu.len()), new_caret.max(after_word).min(nu.len()));
+                                let between = String::from_utf16_lossy(&nu[lo..hi]);
+                                if new_caret >= nu.len() {
+                                    if let Ok(doc) = tp.DocumentRange() {
+                                        caret_at_end(&doc);
+                                    }
+                                } else if !between.contains(['\n', '\r']) {
+                                    let units = count_units(&between, u) as i32;
+                                    move_caret(&tp, if new_caret > after_word { units } else { -units });
+                                }
+                                // Sinon (saut de paragraphe entre les deux), le curseur reste après le mot corrigé.
                             }
                         }
                     }
@@ -815,6 +899,20 @@ mod tests {
             kind: "orthographe".into(),
             key,
         }
+    }
+
+    #[test]
+    fn occurrence_ranks() {
+        let t = "Hello,\nje t\u{2019}ai renvoyer un mdp, renvoyer encore";
+        let first = t.encode_utf16().collect::<Vec<_>>();
+        let pos = |needle: &str, nth: usize| {
+            let s = String::from_utf16_lossy(&first);
+            s.match_indices(needle).nth(nth).map(|(b, _)| s[..b].encode_utf16().count()).unwrap()
+        };
+        assert_eq!(occurrence_index(t, pos("renvoyer", 0), "renvoyer"), Some(0));
+        assert_eq!(occurrence_index(t, pos("renvoyer", 1), "renvoyer"), Some(1));
+        assert_eq!(occurrence_index(t, 3, "renvoyer"), None);
+        assert_eq!(occurrence_index(t, 0, ""), None);
     }
 
     #[test]
