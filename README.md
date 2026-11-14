@@ -6,9 +6,23 @@
 
 - Fonctionne **dans n'importe quelle application** : navigateur, Discord, Word, LibreOffice, VS Code, client mail…
 - **Éditeur intégré** avec vérification pendant la frappe, fautes soulignées par type (orthographe, grammaire, typographie, style).
+- **Bulle de correction en direct** sous Windows : une pastille à côté du champ où tu écris, sans ouvrir l'application.
 - Suggestions en un clic, **Tout corriger**, annulation avec Ctrl+Z, dictionnaire personnel, règles désactivables.
-- Moteur **[LanguageTool](https://languagetool.org)** : le serveur public, ou **ton propre serveur** (Docker sur Proxmox, accès via Tailscale).
+- Moteur **[LanguageTool](https://languagetool.org)** : le serveur public, ou **ton propre serveur** (Docker, par exemple sur un Proxmox accessible via Tailscale).
 - Binaire léger (≈ 6 Mo sous Linux) grâce à [Tauri](https://tauri.app) (Rust + WebView du système).
+
+## Téléchargement
+
+Dernière version : **[page des releases](https://github.com/MathieuRDG/coquille/releases/latest)**.
+
+| Système | Fichier à télécharger |
+|---------|-----------------------|
+| Windows 10 / 11 | `Coquille_…_x64-setup.exe` (ou le `.msi`) |
+| macOS Apple Silicon (M1 et suivants) | `Coquille_…_aarch64.dmg` |
+| macOS Intel | `Coquille_…_x64.dmg` |
+| Linux | `.AppImage`, `.deb` ou `.rpm` ; sous Arch, le PKGBUILD (voir « Installation ») |
+
+Les binaires ne sont pas signés : Windows et macOS affichent un avertissement au premier lancement (voir « Installation »).
 
 ## Est-ce de l'IA ?
 
@@ -18,7 +32,7 @@ Conséquences :
 
 - les corrections sont **déterministes** et chaque remarque explique la règle appliquée ;
 - tout tourne **en local** si tu héberges le serveur, sans GPU ;
-- en revanche, Coquille ne **reformule** pas des phrases entières comme QuillBot. Une fonction de reformulation par IA (Ollama sur ton Proxmox, par exemple) peut s'ajouter plus tard.
+- en revanche, Coquille ne **reformule** pas des phrases entières comme QuillBot. Une fonction de reformulation par IA (avec un modèle local comme Ollama, par exemple) pourrait s'ajouter plus tard.
 
 ## Fonctionnement
 
@@ -43,7 +57,7 @@ Conséquences :
 ### Arch Linux
 
 ```bash
-git clone https://github.com/MathieuRDG/test-claude.git coquille
+git clone https://github.com/MathieuRDG/coquille.git
 ```
 
 ```bash
@@ -64,15 +78,15 @@ sudo pacman -S wl-clipboard wtype
 - `wtype` fonctionne sous Hyprland, Sway et les autres compositeurs wlroots.
 - Sous KDE Plasma ou GNOME, `wtype` n'est pas pris en charge : utilise `ydotool` (démon `ydotoold` requis, voir le wiki Arch) ou colle toi-même avec Ctrl+V. Coquille te prévient si le collage automatique est impossible.
 
-Une **AppImage** et des paquets `.deb`/`.rpm` sont aussi produits par la CI (voir « Compilation »).
+Pour les autres distributions : **AppImage**, `.deb` ou `.rpm` dans les [releases](https://github.com/MathieuRDG/coquille/releases/latest).
 
 ### Windows
 
-Récupère le `.msi` ou le `-setup.exe` dans les *Releases*. Le binaire n'est pas signé : SmartScreen affiche « Windows a protégé votre ordinateur ». Clique sur **Informations complémentaires**, puis **Exécuter quand même**.
+Récupère le `-setup.exe` (ou le `.msi`) dans les [releases](https://github.com/MathieuRDG/coquille/releases/latest). Le binaire n'est pas signé : SmartScreen affiche « Windows a protégé votre ordinateur ». Clique sur **Informations complémentaires**, puis **Exécuter quand même**.
 
 ### macOS
 
-Récupère le `.dmg` (`aarch64` pour Apple Silicon, `x64` pour Intel). L'application n'est pas signée par Apple, alors au premier lancement fais clic droit › **Ouvrir**, ou exécute :
+Récupère le `.dmg` dans les [releases](https://github.com/MathieuRDG/coquille/releases/latest) (`aarch64` pour Apple Silicon, `x64` pour Intel). L'application n'est pas signée par Apple, alors au premier lancement fais clic droit › **Ouvrir**, ou exécute :
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Coquille.app
@@ -141,7 +155,8 @@ Avec ton serveur, tu peux aussi brancher l'**extension navigateur officielle Lan
 - **Bulle et mise en forme** : une correction remplace seulement le mot visé. En revanche, « Éditeur » puis « Remplacer » recolle tout le champ en texte brut, ce qui fait perdre gras, liens, etc. dans les éditeurs riches.
 - **Terminaux** : ils collent avec Ctrl+Maj+V, donc le remplacement automatique n'y fonctionne pas. Utilise **Copier**.
 - **Presse-papiers** : seul son contenu *texte* est restauré après un remplacement. Une image copiée juste avant serait perdue.
-- **Windows et macOS** : le code se compile pour ces deux cibles, mais il n'a été exécuté que sous Linux (X11 et Wayland). Remonte-moi tout comportement anormal.
+- **macOS** : les paquets sont compilés automatiquement, mais n'ont pas encore été testés sur une vraie machine. Linux (X11 et Wayland) et Windows sont testés et utilisés au quotidien.
+- Un problème, une idée ? Ouvre une [issue](https://github.com/MathieuRDG/coquille/issues).
 
 ## Dépannage
 
